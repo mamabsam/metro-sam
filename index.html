@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مترو و اتوبوس شیراز - ماهواره‌ای + GPS</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+body{margin:0;font-family:Tahoma}
+#map{height:100vh;width:100%}
+.info-panel{position:absolute;top:10px;right:10px;background:#fff;padding:12px;border-radius:8px;box-shadow:0 0 10px rgba(0,0,0,.3);z-index:1000;direction:rtl;min-width:280px;max-width:340px;font-size:13px}
+.info-panel h3{margin:0 0 8px;color:#1976d2;font-size:15px}
+.info-panel p{margin:4px 0}
+.schedule-box{background:#e3f2fd;border-radius:6px;padding:8px;margin-top:8px;border-right:4px solid #1976d2}
+.schedule-box h4{margin:0 0 5px;font-size:13px;color:#0d47a1}
+.schedule-item{display:flex;justify-content:space-between;margin:3px 0;font-size:12px}
+.schedule-item .time{font-weight:bold;color:#d32f2f}
+button{background:#1976d2;color:#fff;border:0;padding:8px;border-radius:4px;cursor:pointer;font-family:Tahoma;font-size:13px;margin-top:8px;width:100%}
+button:hover{background:#1565c0}
+.legend{position:absolute;bottom:20px;right:10px;background:#fff;padding:10px;border-radius:8px;box-shadow:0 0 10px rgba(0,0,0,.3);z-index:1000;font-size:13px}
+.legend-item{display:flex;align-items:center;margin:5px 0}
+.dot{width:12px;height:12px;border-radius:50%;margin-left:8px;border:2px solid #fff}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="info-panel">
+  <h3>حمل‌ونقل عمومی شیراز</h3>
+  <p>موقعیت شما: <span id="coords">---</span></p>
+  <p>دقت GPS: <span id="accuracy">---</span></p>
+  <button onclick="startTracking()">📍 شروع ردیابی زنده</button>
+  <div id="nearest-box" class="schedule-box" style="display:none; margin-top:10px; background:#fff3e0; border-right-color:#ff9800;">
+    <h4>نزدیک‌ترین ایستگاه‌ها:</h4>
+    <div class="schedule-item"><span>🚇 مترو:</span><span id="nearest-metro" class="time">---</span><span id="nearest-metro-dist">---</span></div>
+    <div class="schedule-item"><span>🚌 اتوبوس:</span><span id="nearest-bus" class="time">---</span><span id="nearest-bus-dist">---</span></div>
+  </div>
+  <div id="schedule-panel" class="schedule-box" style="display:none;">
+    <h4>زمان حرکت از <span id="selected-station-name"></span>:</h4>
+    <div id="schedule-list"></div>
+  </div>
+</div>
+<div class="legend">
+  <div class="legend-item"><span class="dot" style="background:#1976d2"></span> ایستگاه مترو</div>
+  <div class="legend-item"><span class="dot" style="background:#388e3c"></span> ایستگاه اتوبوس</div>
+  <div class="legend-item"><span class="dot" style="background:#e53935"></span> موقعیت شما</div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ================== ایستگاه‌های مترو ==================
+var metroStations = [
+  {name:"احسان",lat:29.5997,lng:52.5214},
+  {name:"دکتر شریعتی",lat:29.6100,lng:52.5340},
+  {name:"میرزای شیرازی",lat:29.6080,lng:52.5310},
+  {name:"شاهد",lat:29.6060,lng:52.5280},
+  {name:"قصردشت",lat:29.6060,lng:52.5280},
+  {name:"شهید مطهری",lat:29.6050,lng:52.5290},
+  {name:"شهید آوینی",lat:29.6040,lng:52.5300},
+  {name:"نمازی",lat:29.6085,lng:52.5362},
+  {name:"امام حسین (ع)",lat:29.6090,lng:52.5380},
+  {name:"زندیه",lat:29.6110,lng:52.5400},
+  {name:"وکیل الرعایا",lat:29.6120,lng:52.5420},
+  {name:"ولیعصر (عج)",lat:29.6130,lng:52.5440},
+  {name:"کاوه",lat:29.6140,lng:52.5460},
+  {name:"فضیلت",lat:29.6150,lng:52.5480},
+  {name:"غدیر",lat:29.6160,lng:52.5500},
+  {name:"رازی",lat:29.6030,lng:52.5450},
+  {name:"جانبازان",lat:29.6020,lng:52.5470},
+  {name:"شهید دوران",lat:29.6010,lng:52.5490},
+  {name:"فرصت شیرازی",lat:29.6000,lng:52.5510},
+  {name:"شهید دستغیب",lat:29.6054,lng:52.5394}
+];
+
+// ================== ایستگاه‌های اتوبوس (خطوط ۱۰ و ۲۸ + پایانه‌ها) ==================
+var busStations = [
+  // --- ایستگاه‌های خط ۱۰ (پایانه ولیعصر => میدان شهید شیرودی) ---
+  {name:"پایانه ولیعصر", lat:29.60653, lng:52.55735, lines:"خطوط ۱۰، ۱۷، ۲۰، ۷۰، ۷۱"},
+  {name:"ولیعصر (عج)", lat:29.6130, lng:52.5440, lines:"خط ۱۰"},
+  {name:"دروازه سعدی", lat:29.6100, lng:52.5400, lines:"خط ۱۰"},
+  {name:"کاوه", lat:29.6140, lng:52.5460, lines:"خط ۱۰"},
+  {name:"فضیلت", lat:29.6150, lng:52.5480, lines:"خط ۱۰"},
+  {name:"کوی زهرا", lat:29.6180, lng:52.5500, lines:"خط ۱۰"},
+  {name:"فصل آباد", lat:29.6200, lng:52.5520, lines:"خط ۱۰"},
+  {name:"پل غدیر", lat:29.6220, lng:52.5540, lines:"خط ۱۰"},
+  {name:"میدان شهید شیرودی", lat:29.6250, lng:52.5560, lines:"خط ۱۰"},
+
+  // --- ایستگاه‌های خط ۲۸ (شهید دوران => اقبال آباد) ---
+  {name:"شهید دوران", lat:29.6010, lng:52.5490, lines:"خط ۲۸"},
+  {name:"مینو", lat:29.6030, lng:52.5510, lines:"خط ۲۸"},
+  {name:"زمزم", lat:29.6050, lng:52.5530, lines:"خط ۲۸"},
+  {name:"سهل آباد", lat:29.6070, lng:52.5550, lines:"خط ۲۸"},
+  {name:"پیام", lat:29.6090, lng:52.5570, lines:"خط ۲۸"},
+  {name:"پارک محله ای", lat:29.6110, lng:52.5590, lines:"خط ۲۸"},
+  {name:"شریف آباد", lat:29.6130, lng:52.5610, lines:"خط ۲۸"},
+  {name:"آرد خوشه", lat:29.6150, lng:52.5630, lines:"خط ۲۸"},
+  {name:"خوشه", lat:29.6170, lng:52.5650, lines:"خط ۲۸"},
+  {name:"پارک شهروند", lat:29.6190, lng:52.5670, lines:"خط ۲۸"},
+  {name:"نیرو ترانس", lat:29.6210, lng:52.5690, lines:"خط ۲۸"},
+  {name:"قلعه نو", lat:29.6230, lng:52.5710, lines:"خط ۲۸"},
+  {name:"حسینیه", lat:29.6250, lng:52.5730, lines:"خط ۲۸"},
+  {name:"آپادانا", lat:29.6270, lng:52.5750, lines:"خط ۲۸"},
+  {name:"فروزان", lat:29.6290, lng:52.5770, lines:"خط ۲۸"},
+  {name:"اقبال آباد", lat:29.6310, lng:52.5790, lines:"خط ۲۸"},
+
+  // --- پایانه‌های اصلی (با مختصات یافت شده) ---
+  {name:"پایانه استقلال", lat:29.6152, lng:52.52319, lines:"خطوط ۲۷، ۳۷، ۴۸، ۱۴۶، ۱۵۰"},
+  {name:"پایانه نمازی", lat:29.63080, lng:52.51896, lines:"خطوط ۲۲، ۲۴، ۶۸، ۱۰۹، ۱۵۱"},
+  {name:"پایانه شهید دستغیب", lat:29.6054, lng:52.5394, lines:"خطوط ۱، ۲، ۳، ۴، ۵، ۱۴، ۲۶، ۳۱، ۳۳، ۳۵، ۴۵"},
+  {name:"پایانه قصردشت", lat:29.6060, lng:52.5280, lines:"خطوط ۳۶، ۳۷"},
+  {name:"پایانه احمدی نو", lat:29.6400, lng:52.5000, lines:"خطوط ۱۶، ۲۵، ۳۹"},
+  {name:"پایانه ابریشمی", lat:29.5800, lng:52.5100, lines:"خطوط ۱۸"},
+  {name:"پایانه لشکری", lat:29.5500, lng:52.5000, lines:"خطوط ۳۵"},
+  {name:"پایانه بیست متری سعدی", lat:29.6000, lng:52.5200, lines:"خطوط ۲، ۱۴"},
+  {name:"پایانه دروازه کازرون", lat:29.6250, lng:52.4850, lines:"خطوط ۴۸"},
+  {name:"پایانه شاهزاده قاسم", lat:29.6300, lng:52.4900, lines:"نامشخص"},
+  {name:"پایانه عادل آباد", lat:29.6200, lng:52.4800, lines:"نامشخص"},
+
+  // --- ایستگاه‌های متفرقه با مختصات یافت شده ---
+  {name:"ایستگاه ۱۹ فجر", lat:29.67144, lng:52.55911, lines:"خطوط ۱۹"},
+  {name:"ایستگاه برج صنعت", lat:29.6106, lng:52.4914, lines:"نامشخص"},
+  {name:"ایستگاه پارسیان", lat:29.684, lng:52.54996, lines:"نامشخص"},
+  {name:"ایستگاه تلاش", lat:29.67591, lng:52.5547, lines:"نامشخص"},
+  {name:"ایستگاه پوزه سنقری", lat:29.6205, lng:52.5094, lines:"خطوط ۸۰، ۱۰۹"}
+];
+
+// ================== زمان‌بندی مترو ==================
+function generateSchedule(startH, startM, endH, endM, interval) {
+  let times = [], current = startH * 60 + startM, end = endH * 60 + endM;
+  while (current <= end) {
+    let h = Math.floor(current / 60), m = current % 60;
+    times.push((h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m);
+    current += interval;
+  }
+  return times;
+}
+var scheduleEhsanToDastgheib = generateSchedule(6, 5, 22, 0, 15);
+var scheduleDastgheibToEhsan = generateSchedule(6, 10, 21, 10, 15);
+
+function getNextTrains(stationName, count) {
+  let schedule = scheduleEhsanToDastgheib, offset = 0;
+  if (stationName === "شهید دستغیب") schedule = scheduleDastgheibToEhsan;
+  else {
+    let idx = metroStations.findIndex(s => s.name === stationName);
+    if (idx > 0) offset = idx * 1.5;
+  }
+  let now = new Date(), nowMins = now.getHours() * 60 + now.getMinutes(), result = [], found = 0;
+  for (let i = 0; i < schedule.length; i++) {
+    let parts = schedule[i].split(':');
+    let trainMins = parseInt(parts[0]) * 60 + parseInt(parts[1]) + Math.round(offset);
+    if (trainMins >= nowMins) { result.push(schedule[i]); found++; if (found >= count) break; }
+  }
+  return result;
+}
+
+// ================== نقشه ماهواره‌ای ==================
+var map = L.map('map').setView([29.6000, 52.5300], 13);
+var satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom: 19, attribution: '&copy; Esri'}).addTo(map);
+var labelsLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {maxZoom: 19}).addTo(map);
+var streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19});
+L.control.layers({"ماهواره‌ای": satelliteLayer, "خیابانی": streetLayer}, {"نام خیابان‌ها": labelsLayer}).addTo(map);
+
+// ================== افزودن نشانگرها ==================
+metroStations.forEach(function(s) {
+  L.marker([s.lat, s.lng], {
+    icon: L.divIcon({
+      html: '<div style="background:#1976d2;width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.5)"></div>',
+      iconSize: [18, 18], iconAnchor: [9, 9]
+    })
+  }).addTo(map).bindPopup('<b>' + s.name + '</b><br>ایستگاه مترو')
+    .on('click', function() { showStationSchedule(s.name); });
+});
+
+busStations.forEach(function(s) {
+  L.marker([s.lat, s.lng], {
+    icon: L.divIcon({
+      html: '<div style="background:#388e3c;width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.5)"></div>',
+      iconSize: [18, 18], iconAnchor: [9, 9]
+    })
+  }).addTo(map).bindPopup('<b>' + s.name + '</b><br>ایستگاه اتوبوس<br><b>خطوط:</b> ' + (s.lines || 'نامشخص'));
+});
+
+// ================== نمایش زمان‌بندی ==================
+function showStationSchedule(stationName) {
+  document.getElementById('selected-station-name').textContent = stationName;
+  var nextTrains = getNextTrains(stationName, 5), html = '';
+  if (nextTrains.length === 0) html = '<div class="schedule-item">امروز قطاری باقی نمانده.</div>';
+  else nextTrains.forEach(function(t, i) { html += '<div class="schedule-item"><span>قطار ' + (i+1) + ':</span><span class="time">' + t + '</span></div>'; });
+  document.getElementById('schedule-list').innerHTML = html;
+  document.getElementById('schedule-panel').style.display = 'block';
+}
+
+// ================== GPS ==================
+var userMarker = null, watchId = null, firstFix = false;
+function getDistance(lat1, lon1, lat2, lon2) {
+  var R = 6371e3, φ1 = lat1*Math.PI/180, φ2 = lat2*Math.PI/180, Δφ = (lat2-lat1)*Math.PI/180, Δλ = (lon2-lon1)*Math.PI/180;
+  var a = Math.sin(Δφ/2)*Math.sin(Δφ/2) + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)*Math.sin(Δλ/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+function startTracking() {
+  if (!navigator.geolocation) { alert('مرورگر پشتیبانی نمی‌کند'); return; }
+  if (watchId) navigator.geolocation.clearWatch(watchId);
+  watchId = navigator.geolocation.watchPosition(function(pos) {
+    var lat = pos.coords.latitude, lng = pos.coords.longitude, acc = pos.coords.accuracy;
+    document.getElementById('coords').textContent = lat.toFixed(6) + ', ' + lng.toFixed(6);
+    document.getElementById('accuracy').textContent = '±' + Math.round(acc) + ' متر';
+    if (userMarker) userMarker.setLatLng([lat, lng]);
+    else userMarker = L.marker([lat, lng], {icon: L.divIcon({html:'<div style="background:#e53935;width:16px;height:16px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 6px rgba(0,0,0,.6)"></div>',iconSize:[22,22],iconAnchor:[11,11]})}).addTo(map).bindPopup('موقعیت شما');
+    if (!firstFix) { map.setView([lat, lng], 16); firstFix = true; }
+
+    // نزدیک‌ترین مترو
+    var nm = null, md = Infinity;
+    metroStations.forEach(function(s) { var d = getDistance(lat, lng, s.lat, s.lng); if (d < md) { md = d; nm = s; } });
+    // نزدیک‌ترین اتوبوس
+    var nb = null, bd = Infinity;
+    busStations.forEach(function(s) { var d = getDistance(lat, lng, s.lat, s.lng); if (d < bd) { bd = d; nb = s; } });
+
+    if (nm) {
+      document.getElementById('nearest-metro').textContent = nm.name;
+      document.getElementById('nearest-metro-dist').textContent = md < 1000 ? md.toFixed(1) + ' متر' : (md/1000).toFixed(2) + ' کیلومتر';
+    }
+    if (nb) {
+      document.getElementById('nearest-bus').textContent = nb.name;
+      document.getElementById('nearest-bus-dist').textContent = bd < 1000 ? bd.toFixed(1) + ' متر' : (bd/1000).toFixed(2) + ' کیلومتر';
+    }
+    document.getElementById('nearest-box').style.display = 'block';
+  }, function(err) { alert('خطا: ' + err.message); }, {enableHighAccuracy: true, timeout: 10000, maximumAge: 0});
+}
+</script>
+</body>
+</html>
